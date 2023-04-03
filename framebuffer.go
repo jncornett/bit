@@ -6,14 +6,14 @@ import (
 )
 
 type Framebuffer struct {
-	front  *image.NRGBA
-	next   chan *image.NRGBA
-	back   chan *image.NRGBA
-	bounds image.Rectangle
+	front *image.NRGBA
+	next  chan *image.NRGBA
+	back  chan *image.NRGBA
+	image.Rectangle
 }
 
 func NewFrameBuffer(bounds image.Rectangle) *Framebuffer {
-	fb := &Framebuffer{bounds: bounds}
+	fb := &Framebuffer{Rectangle: bounds}
 	fb.next = make(chan *image.NRGBA, 1)
 	fb.back = make(chan *image.NRGBA, 1)
 	fb.back <- image.NewNRGBA(bounds)
@@ -28,13 +28,15 @@ func (fr *Framebuffer) Write(ctx context.Context, f func(*image.NRGBA)) error {
 		return ctx.Err()
 	case buf = <-fr.back:
 	}
+
 	f(buf)
+
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
 	case fr.next <- buf:
+		return nil
 	}
-	return nil
 }
 
 func (fr *Framebuffer) Read() (img *image.NRGBA, changed bool) {

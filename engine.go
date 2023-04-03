@@ -87,6 +87,8 @@ func NewTick(t time.Time) Tick { return Tick{t, t, t} }
 
 func (t Tick) Step(now time.Time) Tick { return Tick{t[0], t[2], now} }
 func (t Tick) Delta() time.Duration    { return t[2].Sub(t[1]) }
+func (t Tick) Zero() time.Time         { return t[0] }
+func (t Tick) Age() time.Duration      { return t[2].Sub(t[0]) }
 
 type WriteBuffer interface {
 	Write(context.Context, func(*image.NRGBA)) error

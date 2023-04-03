@@ -11,8 +11,8 @@ import (
 
 func main() {
 	bit.
-		NewApp(image.Pt(800, 600), func() func(bit.Tick) bit.RenderState {
-			renderState := make(bit.RenderState, 10000)
+		NewApp(image.Pt(3200, 2400), func() func(bit.Tick) bit.RenderState {
+			renderState := make(bit.RenderState, 10)
 			positions := make([]gfx.Vec, len(renderState))
 			velocities := make([]gfx.Vec, len(renderState))
 			halfSize := 2.0

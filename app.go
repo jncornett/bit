@@ -7,7 +7,6 @@ import (
 	"image/color"
 	"image/draw"
 	"os"
-	"sync/atomic"
 	"time"
 
 	"gioui.org/app"
@@ -19,29 +18,36 @@ import (
 	"github.com/apex/log/handlers/cli"
 )
 
-type App struct {
-	FPS          FPS
-	Size         image.Point
-	Steps        func() func(Tick) RenderState
-	DebugEnabled bool
+type App[GameState any] struct {
+	FPS              FPS
+	Size             image.Point
+	InitialGameState GameState
+	Update           func(Tick, GameState) (GameState, RenderState)
+	DebugEnabled     bool
 }
 
-func NewApp(size image.Point, steps func() func(Tick) RenderState) *App {
-	return &App{Steps: steps, FPS: 60, Size: size}
+func NewApp[GameState any](size image.Point, initialGameState GameState, update func(Tick, GameState) (GameState, RenderState)) *App[GameState] {
+	return &App[GameState]{
+		FPS:              60,
+		Size:             size,
+		InitialGameState: initialGameState,
+		Update:           update,
+	}
 }
 
-func (a *App) Debug() *App {
+func (a *App[GameState]) Debug() *App[GameState] {
 	a.DebugEnabled = true
 	return a
 }
 
-func (a *App) Main() {
-	e := Engine[RenderState]{
-		Clock:  DefineClock(a.FPS),
-		Steps:  a.Steps,
-		Render: defaultRender,
-		DrawUI: mainLoop(a.Size),
-		Size:   a.Size,
+func (a *App[GameState]) Main() {
+	e := Engine[GameState, RenderState]{
+		StartClock: MakeClock(a.FPS),
+		Update:     a.Update,
+		Render:     defaultRender,
+		StartDraw:  mainLoop(a.Size),
+		Size:       a.Size,
+		Metrics:    MakeEngineMetrics(time.Now()),
 	}
 	if a.DebugEnabled {
 		log.SetHandler(cli.Default)
@@ -50,20 +56,15 @@ func (a *App) Main() {
 			for range time.Tick(time.Second) {
 				m := e.Metrics.Load()
 				log.
-					WithField("averageLoopFps", m.Loop().AverageFPS()).
-					WithField("averageLoopDuration", m.Loop().AverageDuration()).
-					WithField("loopCount", m.LoopCount).
-					WithField("averageUpdateDuration", m.Update().AverageDuration()).
-					WithField("averageRenderDuration", m.Render().AverageDuration()).
-					WithField("averageDrawFps", m.Draw().AverageFPS()).
-					WithField("averageDrawDuration", m.Draw().AverageDuration()).
-					WithField("drawCount", m.DrawCount).
+					WithField("loop", m.Loop().String()).
+					WithField("update", m.Update.String()).
+					WithField("render", m.Render.String()).
 					Info("metric")
 			}
 		}()
 	}
 	go func() {
-		if err := e.Run(context.Background()); err != nil {
+		if err := e.Run(context.Background(), a.InitialGameState); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}
@@ -72,21 +73,15 @@ func (a *App) Main() {
 	app.Main()
 }
 
-func defaultRender(ctx context.Context, state RenderState, buf WriteBuffer) error {
-	img, ok := buf.TryBack()
-	if !ok {
-		return nil
-	}
-	defer buf.Ready()
-	draw.Draw(*img, (*img).Bounds(), image.Black, image.Point{}, draw.Src)
+func defaultRender(state RenderState, img *image.NRGBA) {
+	draw.Draw(img, img.Bounds(), image.Black, image.Point{}, draw.Src)
 	for _, rect := range state {
-		draw.Draw(*img, rect, image.NewUniform(color.NRGBA{R: 0xff, A: 0xff}), image.Point{}, draw.Src)
+		draw.Draw(img, rect, image.NewUniform(color.NRGBA{R: 0xff, A: 0xff}), image.Point{}, draw.Src)
 	}
-	return nil
 }
 
-func mainLoop(size image.Point) func(buf ReadBuffer, count *uint64) error {
-	return func(buf ReadBuffer, count *uint64) error {
+func mainLoop(size image.Point) func(buf ReadBuffer) error {
+	return func(buf ReadBuffer) error {
 		w := app.NewWindow()
 		var ops op.Ops
 		var resized bool
@@ -111,7 +106,6 @@ func mainLoop(size image.Point) func(buf ReadBuffer, count *uint64) error {
 				op.InvalidateOp{}.Add(gtx.Ops)
 				e.Frame(gtx.Ops)
 			}
-			atomic.AddUint64(count, 1)
 		}
 	}
 }

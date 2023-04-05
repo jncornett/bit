@@ -1,7 +1,6 @@
 package bit
 
 import (
-	"context"
 	"image"
 	"sync/atomic"
 	"time"
@@ -10,54 +9,43 @@ import (
 )
 
 type Engine[GameState, RenderState any] struct {
-	StartClock func() (ticks <-chan Tick, stop func())
-	Update     func(Tick, GameState) (GameState, RenderState)
-	Render     func(RenderState, *image.NRGBA)
-	StartDraw  func(ReadBuffer) error
-	Size       image.Point
-	Metrics    EngineMetrics
+	Update    func(Tick, GameState) (GameState, RenderState)
+	Render    func(RenderState, *image.NRGBA)
+	StartDraw func(ReadBuffer) error
+	Size      image.Point
+	Metrics   EngineMetrics
 }
 
-func (e *Engine[GameState, RenderState]) Run(ctx context.Context, initialGameState GameState) error {
+func (e *Engine[GameState, RenderState]) Run(
+	clock <-chan Tick,
+	initialGameState GameState,
+) error {
 	db := doublebuf.New(
 		image.NewNRGBA(image.Rectangle{Max: e.Size}),
 		image.NewNRGBA(image.Rectangle{Max: e.Size}),
 	)
-	ctx, cancel := context.WithCancel(ctx)
 	done := make(chan struct{})
 	defer func() { e.Metrics.Stop = time.Now() }()
 	go func() {
 		defer close(done)
-		ticks, stop := e.StartClock()
-		defer stop()
 		gameState := initialGameState
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case t, ok := <-ticks:
-				if !ok {
-					return
-				}
+		for tick := range clock {
+			var renderState RenderState
+			WithDurationMetric(&e.Metrics.Update, func() {
+				gameState, renderState = e.Update(tick, gameState)
+			})
 
-				var renderState RenderState
-				WithDurationMetric(&e.Metrics.Update, func() {
-					gameState, renderState = e.Update(t, gameState)
+			if buf, ok := db.TryBack(); ok { // attempt to acquire the back buffer
+				WithDurationMetric(&e.Metrics.Render, func() {
+					e.Render(renderState, *buf)
+					db.Ready()
 				})
-
-				if buf, ok := db.TryBack(); ok { // attempt to acquire the back buffer
-					WithDurationMetric(&e.Metrics.Render, func() {
-						e.Render(renderState, *buf)
-						db.Ready()
-					})
-				}
-
-				atomic.AddUint64(&e.Metrics.LoopCount, 1)
 			}
+
+			atomic.AddUint64(&e.Metrics.LoopCount, 1)
 		}
 	}()
 	err := e.StartDraw(db)
-	cancel()
 	<-done
 	return err
 }

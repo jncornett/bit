@@ -1,7 +1,6 @@
 package bit
 
 import (
-	"context"
 	"fmt"
 	"image"
 	"image/color"
@@ -42,12 +41,11 @@ func (a *App[GameState]) Debug() *App[GameState] {
 
 func (a *App[GameState]) Main() {
 	e := Engine[GameState, RenderState]{
-		StartClock: MakeClock(a.FPS),
-		Update:     a.Update,
-		Render:     defaultRender,
-		StartDraw:  mainLoop(a.Size),
-		Size:       a.Size,
-		Metrics:    MakeEngineMetrics(time.Now()),
+		Update:    a.Update,
+		Render:    defaultRender,
+		StartDraw: mainLoop(a.Size),
+		Size:      a.Size,
+		Metrics:   MakeEngineMetrics(time.Now()),
 	}
 	if a.DebugEnabled {
 		log.SetHandler(cli.Default)
@@ -63,8 +61,10 @@ func (a *App[GameState]) Main() {
 			}
 		}()
 	}
+	clock, stop := NewClock(a.FPS)
 	go func() {
-		if err := e.Run(context.Background(), a.InitialGameState); err != nil {
+		defer stop()
+		if err := e.Run(clock, a.InitialGameState); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}
